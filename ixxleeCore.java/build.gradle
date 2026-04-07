@@ -1,0 +1,27 @@
+﻿plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'com.projectixxlee'
+version = '0.1.0'
+sourceCompatibility = '26'
+targetCompatibility = '26'
+
+application {
+    mainClass = 'com.projectixxlee.App'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.3'
+    // Add AI and Oracle JDBC dependencies here:
+    // implementation 'com.oracle.database.jdbc:ojdbc11:21.12.0.0'
+}
+
+test {
+    useJUnitPlatform()
+}

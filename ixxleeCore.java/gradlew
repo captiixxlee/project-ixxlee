@@ -1,0 +1,20 @@
+﻿#!/usr/bin/env sh
+# Gradle wrapper shell script – generated template
+# (can be replaced by running gradle wrapper when Gradle is available)
+
+DIR=
+case "" in
+    CYGWIN*|MINGW*|MSYS_*)
+        DIR=""
+        ;;
+    *)
+        DIR="C:\Users\Agtca\project-ixxlee"
+        ;;
+esac
+
+if [ -z "" ]; then
+    DIR=.
+fi
+
+# execute the gradle wrapper from local binary distribution
+"/gradle/wrapper/gradle-wrapper.jar" "$@"
