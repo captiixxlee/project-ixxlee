@@ -1,5 +1,30 @@
 package com.ixxlee.core
 
+javac ixxlee.core.java
+java ixxlee.core.java
+
+avdmanager create avd -n testDevice -k "system-images;android-30;google_apis;x86"
+emulator -avd testDevice
+
+myapp/
+├── app/
+│ ├── src/main/java/com/ixxlee.core/myapp/MainActivity.java
+│ ├── src/main/res/layout/activity_main.xml
+│ ├── src/main/AndroidManifest.xml
+│ └── build.gradle
+├── build.gradle
+└── settings.gradle
+
+package com.ixxlee.core.myapp;
+import android.app.Activity;
+import android.os.Bundle;
+public class MainActivity extends Activity {
+   @Override
+   protected void onCreate(Bundle savedInstanceState) {
+       super.onCreate(savedInstanceState);
+       setContentView(R.layout.activity_main);
+   }
+}
 // ---------------------------------------------------------
 // Developer Mode
 // ---------------------------------------------------------
