@@ -1,0 +1,1057 @@
+package com.ixxlee.core
+
+ixxlee-core/
+ ├── src/main/kotlin/...
+ ├── src/main/resources/native/
+ │     ├── linux-x86_64/libflipper.so
+ │     ├── macos/libflipper.dylib
+ │     └── windows/flipper.dll
+
+ object NativeLoader {
+    fun loadFlipper() {
+        val os = System.getProperty("os.name").lowercase()
+        val arch = System.getProperty("os.arch").lowercase()
+
+        val resourcePath = when {
+            os.contains("win") -> "/native/windows/flipper.dll"
+            os.contains("mac") -> "/native/macos/libflipper.dylib"
+            os.contains("linux") -> "/native/linux-x86_64/libflipper.so"
+            else -> error("Unsupported OS for libflipper")
+        }
+
+        val temp = kotlin.io.path.createTempFile("flipper", null).toFile()
+        temp.deleteOnExit()
+
+        NativeLoader::class.java.getResourceAsStream(resourcePath).use { input ->
+            temp.outputStream().use { output -> input!!.copyTo(output) }
+        }
+
+        System.load(temp.absolutePath)
+    }
+NativeLoader.loadFlipper()
+
+ixxlee-core/
+ ├── src/main/kotlin/...
+ ├── src/main/resources/
+ │     └── native/
+ │           ├── linux-x86_64/libflipper.so
+ │           ├── linux-arm64/libflipper.so
+ │           ├── macos/libflipper.dylib
+ │           ├── macos-arm64/libflipper.dylib
+ │           ├── windows/flipper.dll
+ │           └── windows-arm64/flipper.dll
+ }
+
+ package com.ixxlee.core.native
+
+import java.io.File
+import kotlin.io.path.createTempFile
+
+object NativeLoader {
+
+    fun loadFlipper() {
+        val os = System.getProperty("os.name").lowercase()
+        val arch = System.getProperty("os.arch").lowercase()
+
+        val resourcePath = when {
+            os.contains("win") && arch.contains("64") ->
+                "/native/windows/flipper.dll"
+
+            os.contains("win") && arch.contains("arm") ->
+                "/native/windows-arm64/flipper.dll"
+
+            os.contains("mac") && arch.contains("aarch64") ->
+                "/native/macos-arm64/libflipper.dylib"
+
+            os.contains("mac") ->
+                "/native/macos/libflipper.dylib"
+
+            os.contains("linux") && arch.contains("aarch64") ->
+                "/native/linux-arm64/libflipper.so"
+
+            os.contains("linux") ->
+                "/native/linux-x86_64/libflipper.so"
+
+            else -> error("Unsupported OS/architecture for libflipper")
+        }
+
+        val tempFile = createTempFile("libflipper", null).toFile()
+        tempFile.deleteOnExit()
+
+        NativeLoader::class.java.getResourceAsStream(resourcePath)?.use { input ->
+            tempFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        } ?: error("Failed to load resource: $resourcePath")
+
+        System.load(tempFile.absolutePath)
+    }
+}fun main() {
+    NativeLoader.loadFlipper()
+    // then start orchestrator, plugins, etc.
+}
+System.loadLibrary("flipper")
+
+tasks.processResources {
+    from("src/main/resources/native") {
+        into("native")
+    }
+}
+plugins {
+    kotlin("jvm") version "1.9.23"
+    id("com.github.johnrengelman.shadow") version "8.1.1"
+}
+
+tasks.shadowJar {
+    archiveBaseName.set("ixxlee-core")
+    archiveClassifier.set("fat")
+    mergeServiceFiles()
+}
+
+ixxlee/
+ ├── settings.gradle.kts
+ ├── build.gradle.kts          // root
+ ├── ixxlee-core/              // core runtime (fat JAR)
+ │    └── build.gradle.kts
+ ├── ixxlee-desktop/           // desktop entry + integrations
+ │    └── build.gradle.kts
+ └── ixxlee-android/           // Android app/module
+      └── build.gradle.kts
+
+      rootProject.name = "ixxlee"
+
+include(
+    "ixxlee-core",
+    "ixxlee-desktop",
+    "ixxlee-android"
+)
+
+plugins {
+    kotlin("jvm") version "1.9.23" apply false
+    id("com.android.application") version "8.5.0" apply false
+    id("com.github.johnrengelman.shadow") version "8.1.1" apply false
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+plugins {
+    kotlin("jvm")
+    id("com.github.johnrengelman.shadow")
+}
+
+group = "com.ixxlee"
+version = "1.0.0"
+
+dependencies {
+    implementation(kotlin("stdlib"))
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+}
+
+tasks.shadowJar {
+    archiveBaseName.set("ixxlee-core")
+    archiveClassifier.set("fat")
+    mergeServiceFiles()
+}
+
+tasks.processResources {
+    from("src/main/resources/native") {
+        into("native")
+    }
+}
+
+plugins {
+    kotlin("jvm")
+    application
+}
+
+dependencies {
+    implementation(project(":ixxlee-core"))
+}
+
+application {
+    mainClass.set("com.ixxlee.desktop.MainKt")
+}
+
+plugins {
+    id("com.android.application")
+    kotlin("android")
+}
+
+android {
+    namespace = "com.ixxlee.android"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.ixxlee.android"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
+    }
+}
+
+dependencies {
+    implementation(project(":ixxlee-core"))
+}
+interface IxxleePlugin {
+    val id: String
+    val supportedEvents: List<String>
+
+    suspend fun onEvent(
+        event: UserEvent,
+        memory: MemoryStore
+    ): PluginResult
+}
+package com.ixxlee.core.plugins
+
+import com.ixxlee.core.IxxleePlugin
+import java.util.ServiceLoader
+
+object PluginRegistry {
+
+    fun loadAll(): List<IxxleePlugin> {
+        return ServiceLoader.load(IxxleePlugin::class.java).toList()
+    }
+}class EchoPlugin : IxxleePlugin {
+    override val id: String = "echo"
+    override val supportedEvents: List<String> = listOf("TextInput")
+
+    override suspend fun onEvent(
+        event: UserEvent,
+        memory: MemoryStore
+    ): PluginResult {
+        return when (event) {
+            is UserEvent.TextInput ->
+                PluginResult(messages = listOf(UiMessage("You said: ${event.text}")))
+            else -> PluginResult()
+        }
+    }
+}com.ixxlee.core.plugins.EchoPlugin
+
+val plugins = PluginRegistry.loadAll()
+
+val orchestrator = DefaultIxxleeOrchestrator(
+    memory = memoryStore,
+    plugins = plugins,
+    erp = erpEngine
+)
+
+package com.ixxlee.core.memory
+
+import com.ixxlee.core.MemoryRecord
+import com.ixxlee.core.MemoryStore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+class InMemoryMemoryStore : MemoryStore {
+
+    private val mutex = Mutex()
+    private val records = mutableMapOf<String, MemoryRecord>()
+
+    override suspend fun write(key: String, value: String, tags: List<String>) {
+        mutex.withLock {
+            records[key] = MemoryRecord(
+                key = key,
+                value = value,
+                tags = tags,
+                timestamp = System.currentTimeMillis()
+            )
+        }
+    }
+
+    override suspend fun read(key: String): String? =
+        mutex.withLock { records[key]?.value }
+
+    override suspend fun queryByTag(tag: String, limit: Int): List<MemoryRecord> =
+        mutex.withLock {
+            records.values
+                .filter { it.tags.contains(tag) }
+                .sortedByDescending { it.timestamp }
+                .take(limit)
+        }
+}
+
+package com.ixxlee.core.memory
+
+import com.ixxlee.core.MemoryRecord
+import com.ixxlee.core.MemoryStore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+
+class FileMemoryStore(
+    private val dir: File
+) : MemoryStore {
+
+    private val mutex = Mutex()
+    private val index = ConcurrentHashMap<String, MemoryRecord>()
+
+    init {
+        if (!dir.exists()) dir.mkdirs()
+        loadIndex()
+    }
+
+    private fun loadIndex() {
+        dir.listFiles()?.forEach { file ->
+            val key = file.nameWithoutExtension
+            val content = file.readText()
+            index[key] = MemoryRecord(
+                key = key,
+                value = content,
+                tags = emptyList(), // could be extended with metadata
+                timestamp = file.lastModified()
+            )
+        }
+    }
+
+    override suspend fun write(key: String, value: String, tags: List<String>) {
+        mutex.withLock {
+            val file = File(dir, "$key.txt")
+            file.writeText(value)
+            index[key] = MemoryRecord(
+                key = key,
+                value = value,
+                tags = tags,
+                timestamp = System.currentTimeMillis()
+            )
+        }
+    }
+
+    override suspend fun read(key: String): String? =
+        mutex.withLock { index[key]?.value }
+
+    override suspend fun queryByTag(tag: String, limit: Int): List<MemoryRecord> =
+        mutex.withLock {
+            index.values
+                .filter { it.tags.contains(tag) }
+                .sortedByDescending { it.timestamp }
+                .take(limit)
+        }
+}
+
+package com.ixxlee.core.memory
+
+import com.ixxlee.core.MemoryRecord
+import com.ixxlee.core.MemoryStore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+
+class FileMemoryStore(
+    private val dir: File
+) : MemoryStore {
+
+    private val mutex = Mutex()
+    private val index = ConcurrentHashMap<String, MemoryRecord>()
+
+    init {
+        if (!dir.exists()) dir.mkdirs()
+        loadIndex()
+    }
+
+    private fun loadIndex() {
+        dir.listFiles()?.forEach { file ->
+            val key = file.nameWithoutExtension
+            val content = file.readText()
+            index[key] = MemoryRecord(
+                key = key,
+                value = content,
+                tags = emptyList(), // could be extended with metadata
+                timestamp = file.lastModified()
+            )
+        }
+    }
+
+    override suspend fun write(key: String, value: String, tags: List<String>) {
+        mutex.withLock {
+            val file = File(dir, "$key.txt")
+            file.writeText(value)
+            index[key] = MemoryRecord(
+                key = key,
+                value = value,
+                tags = tags,
+                timestamp = System.currentTimeMillis()
+            )
+        }
+    }
+
+    override suspend fun read(key: String): String? =
+        mutex.withLock { index[key]?.value }
+
+    override suspend fun queryByTag(tag: String, limit: Int): List<MemoryRecord> =
+        mutex.withLock {
+            index.values
+                .filter { it.tags.contains(tag) }
+                .sortedByDescending { it.timestamp }
+                .take(limit)
+        }
+}package com.ixxlee.core.memory
+
+import com.ixxlee.core.MemoryRecord
+import com.ixxlee.core.MemoryStore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+
+class FileMemoryStore(
+    private val dir: File
+) : MemoryStore {
+
+    private val mutex = Mutex()
+    private val index = ConcurrentHashMap<String, MemoryRecord>()
+
+    init {
+        if (!dir.exists()) dir.mkdirs()
+        loadIndex()
+    }
+
+    private fun loadIndex() {
+        dir.listFiles()?.forEach { file ->
+            val key = file.nameWithoutExtension
+            val content = file.readText()
+            index[key] = MemoryRecord(
+                key = key,
+                value = content,
+                tags = emptyList(), // could be extended with metadata
+                timestamp = file.lastModified()
+            )
+        }
+    }
+
+    override suspend fun write(key: String, value: String, tags: List<String>) {
+        mutex.withLock {
+            val file = File(dir, "$key.txt")
+            file.writeText(value)
+            index[key] = MemoryRecord(
+                key = key,
+                value = value,
+                tags = tags,
+                timestamp = System.currentTimeMillis()
+            )
+        }
+    }
+
+    override suspend fun read(key: String): String? =
+        mutex.withLock { index[key]?.value }
+
+    override suspend fun queryByTag(tag: String, limit: Int): List<MemoryRecord> =
+        mutex.withLock {
+            index.values
+                .filter { it.tags.contains(tag) }
+                .sortedByDescending { it.timestamp }
+                .take(limit)
+        }
+}package com.ixxlee.core.memory
+
+import com.ixxlee.core.VectorMemory
+import com.ixxlee.core.VectorResult
+import kotlin.math.sqrt
+
+class SimpleVectorMemory : VectorMemory {
+
+    private val embeddings = mutableMapOf<String, FloatArray>()
+
+    override suspend fun embed(text: String): FloatArray {
+        // toy embedding: hash‑based
+        val bytes = text.toByteArray()
+        val vec = FloatArray(16)
+        bytes.forEachIndexed { i, b ->
+            vec[i % vec.size] += (b.toInt() and 0xFF) / 255f
+        }
+        return vec
+    }
+
+    override suspend fun search(query: String, limit: Int): List<VectorResult> {
+        val q = embed(query)
+        return embeddings.map { (key, vec) ->
+            VectorResult(key, cosine(q, vec))
+        }.sortedByDescending { it.score }
+            .take(limit)
+    }
+
+    fun store(key: String, text: String) {
+        // non‑suspend helper
+        // in real use, call from a coroutine
+        // and persist alongside MemoryStore
+        // for now, just in‑memory
+        // (you can wire this to MemoryWrite later)
+        kotlinx.coroutines.runBlocking {
+            embeddings[key] = embed(text)
+        }
+    }
+
+    private fun cosine(a: FloatArray, b: FloatArray): Float {
+        val dot = a.indices.sumOf { (a[it] * b.getOrElse(it) { 0f }).toDouble() }.toFloat()
+        val na = sqrt(a.sumOf { (it * it).toDouble() }.toFloat())
+        val nb = sqrt(b.sumOf { (it * it).toDouble() }.toFloat())
+        return if (na == 0f || nb == 0f) 0f else dot / (na * nb)
+    }
+}
+
+ixxlee/
+ ├── settings.gradle.kts
+ ├── build.gradle.kts              // root
+ ├── ixxlee-core/                  // core runtime (fat JAR)
+ │    ├── build.gradle.kts
+ │    └── src/main/...
+ ├── ixxlee-desktop/               // desktop entry + integrations
+ │    ├── build.gradle.kts
+ │    └── src/main/...
+ └── ixxlee-android/               // Android app/module
+      ├── build.gradle.kts
+      └── src/main/...
+
+      rootProject.name = "ixxlee"
+
+include(
+    "ixxlee-core",
+    "ixxlee-desktop",
+    "ixxlee-android"
+)
+plugins {
+    kotlin("jvm") version "1.9.23" apply false
+    id("com.android.application") version "8.5.0" apply false
+    id("com.github.johnrengelman.shadow") version "8.1.1" apply false
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+plugins {
+    kotlin("jvm")
+    id("com.github.johnrengelman.shadow")
+}
+
+group = "com.ixxlee"
+version = "1.0.0"
+
+dependencies {
+    implementation(kotlin("stdlib"))
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+}
+
+tasks.processResources {
+    from("src/main/resources/native") {
+        into("native")
+    }
+}
+
+tasks.shadowJar {
+    archiveBaseName.set("ixxlee-core")
+    archiveClassifier.set("fat")
+    mergeServiceFiles()
+}
+plugins {
+    kotlin("jvm")
+    application
+}
+
+dependencies {
+    implementation(project(":ixxlee-core"))
+}
+
+application {
+    mainClass.set("com.ixxlee.desktop.MainKt")
+}
+
+plugins {
+    id("com.android.application")
+    kotlin("android")
+}
+
+android {
+    namespace = "com.ixxlee.android"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.ixxlee.android"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
+    }
+}
+
+dependencies {
+    implementation(project(":ixxlee-core"))
+}
+
+package com.ixxlee.core.plugins
+
+import com.ixxlee.core.IxxleePlugin
+import java.util.ServiceLoader
+
+object PluginRegistry {
+
+    fun loadAll(): List<IxxleePlugin> =
+        ServiceLoader.load(IxxleePlugin::class.java).toList()
+}
+
+
+package com.ixxlee.core.plugins
+
+import com.ixxlee.core.*
+
+class EchoPlugin : IxxleePlugin {
+    override val id: String = "echo"
+    override val supportedEvents: List<String> = listOf("TextInput")
+
+    override suspend fun onEvent(
+        event: UserEvent,
+        memory: MemoryStore
+    ): PluginResult {
+        return when (event) {
+            is UserEvent.TextInput ->
+                PluginResult(messages = listOf(UiMessage("You said: ${event.text}")))
+            else -> PluginResult()
+        }
+    }
+}package com.ixxlee.core.memory
+
+import com.ixxlee.core.MemoryRecord
+import com.ixxlee.core.MemoryStore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+class InMemoryMemoryStore : MemoryStore {
+
+    private val mutex = Mutex()
+    private val records = mutableMapOf<String, MemoryRecord>()
+
+    override suspend fun write(key: String, value: String, tags: List<String>) {
+        mutex.withLock {
+            records[key] = MemoryRecord(
+                key = key,
+                value = value,
+                tags = tags,
+                timestamp = System.currentTimeMillis()
+            )
+        }
+    }
+
+    override suspend fun read(key: String): String? =
+        mutex.withLock { records[key]?.value }
+
+    override suspend fun queryByTag(tag: String, limit: Int): List<MemoryRecord> =
+        mutex.withLock {
+            records.values
+                .filter { tag in it.tags }
+                .sortedByDescending { it.timestamp }
+                .take(limit)
+        }
+}
+package com.ixxlee.core.memory
+
+import com.ixxlee.core.MemoryRecord
+import com.ixxlee.core.MemoryStore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.io.File
+
+class FileMemoryStore(
+    private val dir: File
+) : MemoryStore {
+
+    private val mutex = Mutex()
+    private val records = mutableMapOf<String, MemoryRecord>()
+
+    init {
+        if (!dir.exists()) dir.mkdirs()
+        loadExisting()
+    }
+
+    private fun loadExisting() {
+        dir.listFiles { f -> f.extension == "txt" }?.forEach { file ->
+            val key = file.nameWithoutExtension
+            val value = file.readText()
+            records[key] = MemoryRecord(
+                key = key,
+                value = value,
+                tags = emptyList(),
+                timestamp = file.lastModified()
+            )
+        }
+    }
+
+    override suspend fun write(key: String, value: String, tags: List<String>) {
+        mutex.withLock {
+            val file = File(dir, "$key.txt")
+            file.writeText(value)
+            records[key] = MemoryRecord(
+                key = key,
+                value = value,
+                tags = tags,
+                timestamp = System.currentTimeMillis()
+            )
+        }
+    }
+
+    override suspend fun read(key: String): String? =
+        mutex.withLock { records[key]?.value }
+
+    override suspend fun queryByTag(tag: String, limit: Int): List<MemoryRecord> =
+        mutex.withLock {
+            records.values
+                .filter { tag in it.tags }
+                .sortedByDescending { it.timestamp }
+                .take(limit)
+        }
+}
+package com.ixxlee.core.memory
+
+import com.ixxlee.core.VectorMemory
+import com.ixxlee.core.VectorResult
+import kotlin.math.sqrt
+
+class SimpleVectorMemory : VectorMemory {
+
+    private val embeddings = mutableMapOf<String, FloatArray>()
+
+    override suspend fun embed(text: String): FloatArray {
+        val bytes = text.toByteArray()
+        val vec = FloatArray(16)
+        bytes.forEachIndexed { i, b ->
+            vec[i % vec.size] += (b.toInt() and 0xFF) / 255f
+        }
+        return vec
+    }
+
+    override suspend fun search(query: String, limit: Int): List<VectorResult> {
+        val q = embed(query)
+        return embeddings.map { (key, v) ->
+            VectorResult(key, cosine(q, v))
+        }.sortedByDescending { it.score }
+            .take(limit)
+    }
+
+    fun store(key: String, text: String) {
+        // simple helper; call from a coroutine in real use
+        kotlinx.coroutines.runBlocking {
+            embeddings[key] = embed(text)
+        }
+    }
+
+    private fun cosine(a: FloatArray, b: FloatArray): Float {
+        val dot = a.indices.sumOf { (a[it] * b.getOrElse(it) { 0f }).toDouble() }.toFloat()
+        val na = sqrt(a.sumOf { (it * it).toDouble() }.toFloat())
+        val nb = sqrt(b.sumOf { (it * it).toDouble() }.toFloat())
+        return if (na == 0f || nb == 0f) 0f else dot / (na * nb)
+    }
+}
+// ---------------------------------------------------------
+// Developer Mode
+// ---------------------------------------------------------
+
+interface KeyValueStore {
+    fun getBoolean(key: String, default: Boolean): Boolean
+    fun putBoolean(key: String, value: Boolean)
+}
+
+ class AndroidUsbDeviceManager(context: Context) : UsbDeviceManager {
+    override fun listDevices(): List<UsbDevice> { ... }
+    override fun sendCommand(deviceId: String, command: String, args: Map<String, Any?>) { ... }
+
+}object DevModeManager {
+    private const val PASSCODE = "006600"
+
+    fun isEnabled(store: KeyValueStore): Boolean =
+        store.getBoolean("dev_mode_enabled", false)
+
+    fun unlock(input: String, store: KeyValueStore): Boolean {
+        val ok = input == PASSCODE
+        if (ok) store.putBoolean("dev_mode_enabled", true)
+        return ok
+    }
+}
+
+
+    fun isEnabled(prefs: android.content.SharedPreferences): Boolean =
+        prefs.getBoolean("dev_mode_enabled", false)
+
+    fun unlock(input: String, prefs: android.content.SharedPreferences): Boolean {
+        val ok = input == PASSCODE
+        if (ok) prefs.edit().putBoolean("dev_mode_enabled", true).apply()
+        return ok
+    }}
+
+// ---------------------------------------------------------
+// User Events & UI Messages
+// ---------------------------------------------------------
+
+sealed class UserEvent {
+    data class TextInput(val text: String) : UserEvent()
+    data class VoiceInput(val transcript: String) : UserEvent()
+    data class DeviceEvent(val deviceId: String, val payload: Map<String, Any?>) : UserEvent()
+    data class SystemEvent(val type: String, val data: Map<String, Any?>) : UserEvent()
+}
+
+data class UiMessage(
+    val text: String,
+    val type: String = "text"
+)
+
+// ---------------------------------------------------------
+// Orchestrator Core
+// ---------------------------------------------------------
+
+override suspend fun handleUserEvent(event: UserEvent): OrchestratorResult {
+    // 1. Fan-out to plugins
+    val pluginResults = plugins.map { it.onEvent(event, memory) }
+    ...
+}
+interface IxxleeOrchestrator {
+    suspend fun handleUserEvent(event: UserEvent): OrchestratorResult
+}
+
+data class OrchestratorResult(
+    val messages: List<UiMessage> = emptyList(),
+    val deviceCommands: List<DeviceCommand> = emptyList(),
+    val erpActions: List<ErpAction> = emptyList()
+)
+
+
+class DefaultIxxleeOrchestrator(
+    private val memory: MemoryStore,
+    private val plugins: List<IxxleePlugin>,
+    private val erp: ErpEngine
+) : IxxleeOrchestrator {
+
+    override suspend fun handleUserEvent(event: UserEvent): OrchestratorResult {
+        // 1. Fan-out to plugins (sequential)
+        val pluginResults = mutableListOf<PluginResult>()
+        for (plugin in plugins) {
+            val result = plugin.onEvent(event, memory)
+            pluginResults += result
+        }
+
+        // 2. Persist memory writes
+        pluginResults
+            .flatMap { it.memoryWrites }
+            .forEach { memory.write(it.key, it.value, it.tags) }
+
+        // 3. Build ERP context
+        val erpContext = ErpContext(
+            userId = "captain",
+            recentEvents = listOf(event),
+            memorySnapshot = memory.queryByTag("erp_relevant", 100)
+        )
+
+        // 4. ERP evaluation
+        val erpActions = erp.evaluate(erpContext)
+
+        // 5. Aggregate results
+        return OrchestratorResult(
+            messages = pluginResults.flatMap { it.messages },
+            deviceCommands = pluginResults.flatMap { it.deviceCommands },
+            erpActions = erpActions
+        )
+    }
+}
+// ---------------------------------------------------------
+// Memory Backend (Key/Value + Vector)
+// ---------------------------------------------------------
+
+interface MemoryStore {
+    suspend fun write(key: String, value: String, tags: List<String>)
+    suspend fun read(key: String): String?
+    suspend fun queryByTag(tag: String, limit: Int): List<MemoryRecord>
+}
+
+data class MemoryRecord(
+    val key: String,
+    val value: String,
+    val tags: List<String>,
+    val timestamp: Long
+)
+
+data class MemoryWrite(
+    val key: String,
+    val value: String,
+    val tags: List<String>
+)
+
+interface VectorMemory {
+    suspend fun embed(text: String): FloatArray
+    suspend fun search(query: String, limit: Int): List<VectorResult>
+}
+
+data class VectorResult(
+    val key: String,
+    val score: Float
+)
+
+// ---------------------------------------------------------
+// Plugin / Device Layer
+// ---------------------------------------------------------
+
+interface IxxleePlugin {
+    val id: String
+    val supportedEvents: List<String>
+
+     fun onEvent(
+        event: UserEvent,
+        memory: MemoryStore
+    ): PluginResult
+class DesktopUsbDeviceManager : UsbDeviceManager {
+    override fun listDevices(): List<UsbDevice> { ... }
+    override fun sendCommand(deviceId: String, command: String, args: Map<String, Any?>) { ... }
+}
+
+}
+
+data class PluginResult(
+    val deviceCommands: List<DeviceCommand> = emptyList(),
+    val messages: List<UiMessage> = emptyList(),
+    val memoryWrites: List<MemoryWrite> = emptyList()
+)
+
+data class DeviceCommand(
+    val targetDeviceId: String,
+    val command: String,
+    val args: Map<String, Any?> = emptyMap()
+)
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation(kotlin("stdlib"))
+    // add your other deps here, e.g. coroutines:
+    // implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+}
+
+application {
+    // Replace with your real main class if you have one
+    mainClass.set("com.ixxlee.core.MainKt")
+}
+
+tasks.withType<Jar> {
+    // Name the fat jar
+    archiveBaseName.set("ixxlee-core-fat")
+
+    // Include runtime dependencies
+    from(
+        configurations.runtimeClasspath.get()
+            .filter { it.name.endsWith("jar") }
+            .map { zipTree(it) }
+    )
+
+    // Avoid duplicate META-INF issues
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    manifest {
+        attributes(
+            "Main-Class" to "com.ixxlee.core.MainKt"
+        )
+    }
+}
+
+class DefaultIxxleeOrchestrator(
+    private val memory: MemoryStore,
+    private val plugins: List<IxxleePlugin>,
+    private val erp: ErpEngine
+
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+
+
+// ---------------------------------------------------------
+// Analyzer → Classifier → Plugin Generator Pipeline
+// ---------------------------------------------------------
+
+data class DeviceDescriptor(
+    val raw: String,
+    val metadata: Map<String, Any?> = emptyMap()
+)
+
+enum class DeviceType {
+    UNKNOWN,
+    USB_SENSOR,
+    USB_STORAGE,
+    CUSTOM_DEVICE
+}
+
+interface DescriptorAnalyzer {
+    fun analyze(input: String): DeviceDescriptor
+}
+
+interface DeviceClassifier {
+    fun classify(desc: DeviceDescriptor): DeviceType
+}
+
+interface PluginGenerator {
+    fun generatePlugin(desc: DeviceDescriptor, type: DeviceType): IxxleePlugin
+}
+
+// ---------------------------------------------------------
+// ERP Intelligence Layer
+// ---------------------------------------------------------
+
+interface ErpEngine {
+    suspend fun evaluate(context: ErpContext): List<ErpAction>
+}
+
+data class ErpContext(
+    val userId: String,
+    val recentEvents: List<UserEvent>,
+    val memorySnapshot: List<MemoryRecord>
+)
+
+data class ErpAction(
+    val type: String,
+    val payload: Map<String, Any?>
+)
+
+// ---------------------------------------------------------
+// RLHF Feedback Loop
+// ---------------------------------------------------------
+
+data class Feedback(
+    val event: UserEvent,
+    val result: OrchestratorResult,
+    val rating: Int,
+    val notes: String?
+)
+
+// ---------------------------------------------------------
+// Script Engine
+// ---------------------------------------------------------
+
+interface ScriptEngine {
+    fun buildScript(commands: List<DeviceCommand>): String
+    suspend fun execute(script: String): ExecutionResult
+}
+
+data class ExecutionResult(
+    val success: Boolean,
+    val output: String
+)
+
+// ---------------------------------------------------------
+// USB Device Orchestration
+// ---------------------------------------------------------
+
+data class UsbDevice(
+    val id: String,
+    val vendorId: Int,
+    val productId: Int,
+    val name: String
+)
+
+interface UsbDeviceManager {
+    fun listDevices(): List<UsbDevice>
+    fun sendCommand(deviceId: String, command: String, args: Map<String, Any?>)
+}
